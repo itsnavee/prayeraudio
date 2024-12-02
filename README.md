@@ -120,6 +120,49 @@ Features:
 python prayertimes.py
 ```
 
+## Service Setup
+To run the application as a systemd service, create a service file at `/etc/systemd/system/prayer.service`:
+
+```ini
+[Unit]
+Description=Prayer Times Audio Service
+After=sound.target
+
+[Service]
+Type=simple
+User=<your-username>
+Environment=XDG_RUNTIME_DIR=/run/user/<your-user-id>
+Environment=PULSE_RUNTIME_PATH=/run/user/<your-user-id>/pulse
+WorkingDirectory=/home/<your-username>/path/to/prayertimes
+ExecStartPre=/bin/bash -c 'source /home/<your-username>/path/to/prayertimes/.env/bin/activate'
+ExecStartPre=/usr/bin/pactl set-default-sink <sink-number>
+ExecStartPre=/usr/bin/pactl set-sink-volume <sink-number> 100%
+ExecStart=/bin/bash -c 'source /home/<your-username>/path/to/prayertimes/.env/bin/activate && python3 prayertimes.py'
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Note: Replace the following placeholders with your values:
+- `<your-username>`: Your system username
+- `<your-user-id>`: Your user ID (usually 1000 for first user)
+- `<sink-number>`: Your audio sink number from `pactl list sinks`
+- Update paths to match your installation directory
+
+Enable and start the service:
+```bash
+sudo systemctl enable prayer
+sudo systemctl start prayer
+```
+
+Monitor service status:
+```bash
+sudo systemctl status prayer
+journalctl -u prayer
+```
+
 ## Development
 
 The application is structured into several classes:
