@@ -7,17 +7,27 @@ import threading
 import sounddevice as sd
 import soundfile as sf
 import argparse
-import cv2
-import pytesseract
-import re
-import numpy as np
-import math
+import pandas as pd
+from collections import OrderedDict
+
+# Get absolute path of the project root directory
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Define paths for different directories
+SCHEDULE_DIR = os.path.join(ROOT_DIR, 'schedule')
+SOUNDS_DIR = os.path.join(ROOT_DIR, 'sounds')
+LOGS_DIR = os.path.join(ROOT_DIR, 'logs')
+CONFIG_DIR = os.path.join(ROOT_DIR, 'utils')
 
 def setup_logging():
     logger = logging.getLogger('PrayerAudio')
     logger.setLevel(logging.INFO)
     
-    fh = logging.FileHandler('play.log')
+    # Create logs directory if it doesn't exist
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    
+    log_file = os.path.join(LOGS_DIR, 'play.log')
+    fh = logging.FileHandler(log_file)
     fh.setLevel(logging.INFO)
     fh_formatter = logging.Formatter('%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     fh.setFormatter(fh_formatter)
@@ -35,49 +45,71 @@ logger = setup_logging()
 
 class Config:
     def __init__(self):
-        # Default values
+        # Default values with numbered prayer names
         self.global_margin = 0
         self.prayer_margins = {
-            'Fajr': 0, 'Dhuhr': 0, 'Asr': 0, 'Maghrib': 0, 'Isha': 0
+            '01-Fajr': 0,
+            '02-Dhuhr': 0,
+            '03-Asr': 0,
+            '04-Maghrib': 0,
+            '05-Isha': 0
         }
         self.load_config()
 
     def load_config(self):
         try:
-            if os.path.exists('config.json'):
-                with open('config.json', 'r') as f:
+            config_file = os.path.join(CONFIG_DIR, 'config.json')
+            if os.path.exists(config_file):
+                with open(config_file, 'r') as f:
                     config = json.load(f)
                     self.global_margin = config.get('global_margin', 0)
-                    self.prayer_margins = config.get('prayer_margins', self.prayer_margins)
-                    logger.info(f"Loaded config: global margin: {self.global_margin}, prayer margins: {self.prayer_margins}")
+                    
+                    # Load prayer margins with validation
+                    prayer_margins = config.get('prayer_margins', {})
+                    for prayer in ['01-Fajr', '02-Dhuhr', '03-Asr', '04-Maghrib', '05-Isha']:
+                        if prayer in prayer_margins:
+                            self.prayer_margins[prayer] = prayer_margins[prayer]
+                        else:
+                            logger.warning(f"Missing margin for {prayer} in config.json")
+                    
+                    logger.info(f"Loaded config: global margin: {self.global_margin}")
+                    logger.info(f"Prayer margins: {json.dumps(self.prayer_margins, indent=2)}")
         except Exception as e:
             logger.warning(f"Failed to load config.json, using defaults: {e}")
 
 class AudioPlayer:
     def __init__(self, dry_run=False):
         logger.info("Initializing AudioPlayer")
+        self.dry_run = dry_run
         self.volume = self.load_volume()
         self.skip_prayers = self.load_skip_prayers()
-        self.dry_run = dry_run
         self.last_play_time = {}  # Track last play time for each prayer
         
     def load_volume(self):
         try:
-            with open('volume.txt', 'r') as f:
-                vol = int(f.read().strip())
-                vol = max(0, min(10, vol)) / 10.0
-                logger.info(f"Volume loaded: {vol * 10}/10")
-                return vol
+            volume_file = os.path.join(CONFIG_DIR, 'volume.txt')
+            volumes = {}
+            with open(volume_file, 'r') as f:
+                for line in f:
+                    key, value = line.strip().split(':')
+                    volumes[key.strip()] = int(value.strip())
+            
+            # Use dryrun volume if in dry run mode, otherwise use execution volume
+            vol = volumes['dryrun' if self.dry_run else 'execution']
+            vol = max(0, min(10, vol)) / 10.0
+            logger.info(f"Volume loaded: {vol * 10}/10 ({'dry run' if self.dry_run else 'execution'} mode)")
+            return vol
         except Exception as e:
             logger.warning(f"Failed to load volume.txt, using default: {e}")
-            return 0.9
+            return 0.9 if not self.dry_run else 0.2  # Lower default volume for dry run
 
     def load_skip_prayers(self):
         try:
-            if os.path.exists('skip.txt'):
-                with open('skip.txt', 'r') as f:
+            skip_file = os.path.join(CONFIG_DIR, 'skip.txt')
+            if os.path.exists(skip_file):
+                with open(skip_file, 'r') as f:
                     skip_numbers = [int(x.strip()) for x in f.read().strip().split(',')]
-                prayers = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']
+                prayers = ['01-Fajr', '02-Dhuhr', '03-Asr', '04-Maghrib', '05-Isha']
                 skip_prayers = [prayers[i-1] for i in skip_numbers if 1 <= i <= 5]
                 logger.info(f"Skipping prayers: {', '.join(skip_prayers)}")
                 return skip_prayers
@@ -100,7 +132,7 @@ class AudioPlayer:
 
         logger.info(f"Attempting to play audio for {prayer_name}")
         try:
-            audio_file = 'beep.mp3' if self.dry_run else 'adhan.mp3'
+            audio_file = os.path.join(SOUNDS_DIR, 'beep.mp3' if self.dry_run else 'adhan.mp3')
             if os.path.exists(audio_file):
                 logger.info(f"Found audio file: {audio_file}")
                 data, samplerate = sf.read(audio_file)
@@ -119,143 +151,75 @@ class PrayerScheduleManager:
         self.schedule = {}
         self.config = config
         
-    def parse_image_to_json(self, month, year):
+    def parse_excel_to_json(self, month, year):
         logger.info(f"Parsing schedule for {month} {year}")
-        image_file = f'schedule_{month.lower()}{str(year)[2:]}.png'
-        json_file = f'schedule_{month.lower()}{str(year)[2:]}.json'
+        excel_file = os.path.join(SCHEDULE_DIR, f'schedule_{month.lower()}{str(year)[2:]}.xlsx')
+        json_file = os.path.join(SCHEDULE_DIR, f'schedule_{month.lower()}{str(year)[2:]}.json')
         
         # First try to load the current month's JSON
         if os.path.exists(json_file):
             logger.info(f"Loading existing JSON file: {json_file}")
             with open(json_file, 'r') as f:
-                self.schedule = json.load(f)
+                self.schedule = json.load(f, object_pairs_hook=OrderedDict)
             return
         
-        logger.info(f"Parsing image file: {image_file}")
-        schedule_data = {}
+        logger.info(f"Parsing Excel file: {excel_file}")
+        schedule_data = OrderedDict()
         
         try:
-            img = cv2.imread(image_file)
-            if img is None:
-                raise FileNotFoundError(f"Could not read image file: {image_file}")
+            # Read Excel file with header information
+            df = pd.read_excel(excel_file, header=[0,1,2])  # Multi-level headers
+            logger.info(f"Excel columns found: {list(df.columns)}")
             
-            # Enhanced preprocessing
-            # Convert to grayscale
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            
-            # Apply multiple threshold methods and combine results
-            thresh1 = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-            _, thresh2 = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            
-            # Combine the results
-            combined = cv2.bitwise_and(thresh1, thresh2)
-            
-            # Denoise
-            denoised = cv2.fastNlMeansDenoising(combined)
-            
-            # Scale up the image (2x)
-            scaled = cv2.resize(denoised, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-            
-            # Add border for better recognition
-            bordered = cv2.copyMakeBorder(scaled, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
-            
-            # Save debug image
-            debug_image = f'debug_processed_{month.lower()}{str(year)[2:]}.png'
-            cv2.imwrite(debug_image, bordered)
-            logger.info(f"Saved debug image to {debug_image}")
-            
-            # Try different OCR configurations
-            configs = [
-                r'--oem 3 --psm 6 -c tessedit_char_whitelist="0123456789: "',
-                r'--oem 3 --psm 4 -c tessedit_char_whitelist="0123456789: "',
-                r'--oem 3 --psm 11 -c tessedit_char_whitelist="0123456789: "'
-            ]
-            
-            def is_valid_prayer_times(times):
-                if len(times) != 5:
-                    return False
+            # Process each row
+            for index, row in df.iterrows():
+                if pd.isna(row.iloc[0]):  # Skip empty rows
+                    continue
                     
-                # Basic validation rules for prayer times
-                try:
-                    fajr = [int(x) for x in times[0].split(':')]
-                    dhuhr = [int(x) for x in times[1].split(':')]
-                    asr = [int(x) for x in times[2].split(':')]
-                    maghrib = [int(x) for x in times[3].split(':')]
-                    isha = [int(x) for x in times[4].split(':')]
-                    
-                    # Fajr should be early morning (between 4:00 and 7:00)
-                    if not (4 <= fajr[0] <= 7):
-                        return False
-                        
-                    # Dhuhr should be around noon (between 12:00 and 14:00)
-                    if not (12 <= dhuhr[0] <= 14):
-                        return False
-                        
-                    # Asr should be afternoon (between 14:00 and 16:30)
-                    if not (14 <= asr[0] <= 16 or (asr[0] == 16 and asr[1] <= 30)):
-                        return False
-                        
-                    # Maghrib should be evening (between 16:00 and 18:00)
-                    if not (16 <= maghrib[0] <= 18):
-                        return False
-                        
-                    # Isha should be night (between 19:00 and 21:00)
-                    if not (19 <= isha[0] <= 21):
-                        return False
-                        
-                    return True
-                except:
-                    return False
-            
-            valid_time_sets = []
-            for config in configs:
-                text = pytesseract.image_to_string(bordered, config=config)
-                logger.info(f"OCR text with config {config}:\n{text}")
+                day = str(index + 1)  # Use index + 1 as day number since we're reading from the data rows
                 
-                # Split text into lines and process each line
-                lines = [line.strip() for line in text.split('\n') if line.strip()]
-                
-                for line in lines:
-                    # Extract all time patterns from the line
-                    time_patterns = re.findall(r'\d{1,2}:\d{2}', line)
-                    
-                    # If we found exactly 5 times in this line
-                    if len(time_patterns) == 5 and is_valid_prayer_times(time_patterns):
-                        valid_time_sets.append(time_patterns)
-            
-            # Remove duplicates while preserving order
-            seen = set()
-            times = [x for x in valid_time_sets if not (tuple(x) in seen or seen.add(tuple(x)))]
-            
-            if not times:
-                raise ValueError("No valid prayer times found in the image")
-            
-            logger.info(f"Extracted valid time sets: {times}")
-            
-            # Process each set of 5 times
-            for day, prayer_times in enumerate(times, 1):
-                if len(prayer_times) == 5:
-                    schedule_data[str(day)] = {
-                        'Fajr': prayer_times[0],
-                        'Dhuhr': prayer_times[1],
-                        'Asr': prayer_times[2],
-                        'Maghrib': prayer_times[3],
-                        'Isha': prayer_times[4]
-                    }
-                    logger.info(f"Day {day} times: {schedule_data[str(day)]}")
+                # Store both azan and jamaat times
+                schedule_data[day] = {
+                    # Main schedule (jamaat times) - used for prayer alarms
+                    "jamaat_times": OrderedDict({
+                        '01-Fajr': str(row.iloc[9]),     # Column J (Fajr Jamaat)
+                        '02-Dhuhr': str(row.iloc[10]),   # Column K (Dhuhr Jamaat)
+                        '03-Asr': str(row.iloc[11]),     # Column L (Asr Jamaat)
+                        '04-Maghrib': str(row.iloc[12]), # Column M (Maghrib Jamaat)
+                        '05-Isha': str(row.iloc[13])     # Column N (Isha Jamaat)
+                    }),
+                    # Additional context (azan times and sunrise)
+                    "azan_times": OrderedDict({
+                        '01-Fajr': str(row.iloc[1]),     # Column B (Fajr Azan)
+                        'Sunrise': str(row.iloc[2]),     # Column C (Sunrise)
+                        '02-Dhuhr': str(row.iloc[3]),    # Column D (Dhuhr Azan)
+                        '03-Asr-Shafi': str(row.iloc[4]),# Column E (Asr Shafi Azan)
+                        '03-Asr-Hanafi': str(row.iloc[5]),# Column F (Asr Hanafi Azan)
+                        '04-Maghrib': str(row.iloc[6]),  # Column G (Maghrib Azan)
+                        '05-Isha': str(row.iloc[7])      # Column H (Isha Azan)
+                    })
+                }
+                logger.info(f"Day {day} jamaat times: {schedule_data[day]['jamaat_times']}")
+                logger.info(f"Day {day} azan times: {schedule_data[day]['azan_times']}")
             
             if not schedule_data:
-                raise ValueError("No valid schedule data found in image")
+                raise ValueError("No valid schedule data found in Excel file")
             
-            # Save the schedule
+            # Sort the schedule by converting keys to integers for proper numerical ordering
+            sorted_schedule = OrderedDict(sorted(schedule_data.items(), key=lambda x: int(x[0])))
+            
+            # Create schedule directory if it doesn't exist
+            os.makedirs(os.path.dirname(json_file), exist_ok=True)
+            
+            # Save the schedule with proper indentation for readability
             with open(json_file, 'w') as f:
-                json.dump(schedule_data, f, indent=4, sort_keys=True)
-                logger.info(f"Saved schedule to {json_file}")
+                json.dump(sorted_schedule, f, indent=2)
+            logger.info(f"Saved schedule to {json_file}")
             
-            self.schedule = schedule_data
+            self.schedule = sorted_schedule
             
         except Exception as e:
-            logger.error(f"Error parsing image: {str(e)}")
+            logger.error(f"Error parsing Excel file: {str(e)}")
             raise
 
 class PrayerService:
@@ -275,7 +239,7 @@ class PrayerService:
         current_month = now.strftime("%b").lower()
         
         logger.info("Loading/Creating schedule file")
-        self.schedule_manager.parse_image_to_json(current_month, now.year)
+        self.schedule_manager.parse_excel_to_json(current_month, now.year)
         
         logger.info("Playing startup test audio")
         self.audio_player.play_audio("Startup Test")
@@ -284,12 +248,12 @@ class PrayerService:
             logger.info("Dry run mode - Testing with current date schedule")
             current_date = str(now.day)
             if current_date in self.schedule_manager.schedule:
-                daily_schedule = self.schedule_manager.schedule[current_date]
+                daily_schedule = self.schedule_manager.schedule[current_date]['jamaat_times']  # Use jamaat_times
                 logger.info(f"\nToday's schedule (Day {current_date}):")
                 
                 for prayer, time_str in daily_schedule.items():
                     prayer_time = datetime.strptime(f"{now.year}-{now.month}-{now.day} {time_str}", 
-                                                  "%Y-%m-%d %H:%M")
+                                                  "%Y-%m-%d %H:%M:%S")
                     margin = timedelta(minutes=self.config.prayer_margins.get(prayer, 0) or 
                                               self.config.global_margin)
                     adjusted_time = prayer_time - margin
@@ -309,11 +273,11 @@ class PrayerService:
             current_date = str(now.day)
             
             if current_date in self.schedule_manager.schedule:
-                daily_schedule = self.schedule_manager.schedule[current_date]
+                daily_schedule = self.schedule_manager.schedule[current_date]['jamaat_times']  # Use jamaat_times
                 
                 for prayer, time_str in daily_schedule.items():
                     prayer_time = datetime.strptime(f"{now.year}-{now.month}-{now.day} {time_str}", 
-                                                  "%Y-%m-%d %H:%M")
+                                                  "%Y-%m-%d %H:%M:%S")
                     margin = timedelta(minutes=self.config.prayer_margins.get(prayer, 0) or 
                                               self.config.global_margin)
                     adjusted_time = prayer_time - margin

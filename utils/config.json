@@ -1,0 +1,10 @@
+{
+  "global_margin": 7,
+  "prayer_margins": {
+    "01-Fajr": 30,
+    "02-Dhuhr": 0,
+    "03-Asr": 0,
+    "04-Maghrib": 0,
+    "05-Isha": 10
+  }
+}
