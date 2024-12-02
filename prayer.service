@@ -1,0 +1,19 @@
+[Unit]
+Description=Prayer Times Audio Service
+After=sound.target
+
+[Service]
+Type=simple
+User=blackzero
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=PULSE_RUNTIME_PATH=/run/user/1000/pulse
+WorkingDirectory=/home/blackzero/scripts/prayertimes
+ExecStartPre=/bin/bash -c 'source /home/blackzero/scripts/prayertimes/prayertimes_env/bin/activate'
+ExecStartPre=/usr/bin/pactl set-default-sink 48
+ExecStartPre=/usr/bin/pactl set-sink-volume 48 100%
+ExecStart=/bin/bash -c 'source /home/blackzero/scripts/prayertimes/prayertimes_env/bin/activate && python3 prayertimes.py'
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

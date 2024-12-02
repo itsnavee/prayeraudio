@@ -1,0 +1,31 @@
+# Python virtual environment
+prayertimes_env/
+venv/
+env/
+.env/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Logs and debug files
+*.log
+debug_processed*.png
+play.log
+
+# IDE specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Project specific
+schedule_*.json
+volume.txt
+skip.txt 

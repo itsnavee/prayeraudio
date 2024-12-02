@@ -1,0 +1,1 @@
+journalctl -xeu prayer.service
