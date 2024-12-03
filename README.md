@@ -14,7 +14,8 @@ Automated system for playing Adhan (prayer call) at scheduled times. Reads praye
 ├── utils/            # Configuration files
 │   ├── config.json   # Margin settings
 │   ├── volume.txt    # Volume settings
-│   └── skip.txt      # Prayer skip settings
+│   ├── skip.txt      # Prayer skip settings
+│   └── service.prayer_example  # Systemd service template
 └── prayertimes.py    # Main application file
 ```
 
@@ -121,47 +122,64 @@ python prayertimes.py
 ```
 
 ## Service Setup
-To run the application as a systemd service, create a service file at `/etc/systemd/system/prayer.service`:
 
-```ini
-[Unit]
-Description=Prayer Times Audio Service
-After=sound.target
+The application can be run as a systemd service. Follow these steps:
 
-[Service]
-Type=simple
-User=<your-username>
-Environment=XDG_RUNTIME_DIR=/run/user/<your-user-id>
-Environment=PULSE_RUNTIME_PATH=/run/user/<your-user-id>/pulse
-WorkingDirectory=/home/<your-username>/path/to/prayertimes
-ExecStartPre=/bin/bash -c 'source /home/<your-username>/path/to/prayertimes/.env/bin/activate'
-ExecStartPre=/usr/bin/pactl set-default-sink <sink-number>
-ExecStartPre=/usr/bin/pactl set-sink-volume <sink-number> 100%
-ExecStart=/bin/bash -c 'source /home/<your-username>/path/to/prayertimes/.env/bin/activate && python3 prayertimes.py'
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
+1. Create a virtual environment and install dependencies:
+```bash
+python3 -m venv .env
+source .env/bin/activate
+pip install -r requirements.txt
 ```
 
-Note: Replace the following placeholders with your values:
+2. Copy and customize the service template:
+```bash
+cp utils/service.prayer_example utils/service.prayer
+```
+
+3. Edit `utils/service.prayer` and replace the placeholders:
 - `<your-username>`: Your system username
 - `<your-user-id>`: Your user ID (usually 1000 for first user)
-- `<sink-number>`: Your audio sink number from `pactl list sinks`
 - Update paths to match your installation directory
 
-Enable and start the service:
+4. Check your audio device:
 ```bash
+# List available audio sinks
+pactl list short sinks
+
+# Test audio output (optional)
+paplay --device=<sink-name> sounds/beep.mp3
+```
+
+5. The service is configured to automatically detect and use the Jieli Technology audio device. If you're using a different audio device, modify the `ExecStartPre` commands in `service.prayer` to match your audio device name:
+```ini
+ExecStartPre=/bin/bash -c 'SINK_NAME=$(pactl list short sinks | grep "Your_Device_Name" | cut -f2) && pactl set-default-sink "$SINK_NAME"'
+ExecStartPre=/bin/bash -c 'SINK_NAME=$(pactl list short sinks | grep "Your_Device_Name" | cut -f2) && pactl set-sink-volume "$SINK_NAME" 100%'
+```
+
+6. Install and start the service:
+```bash
+# Copy service file
+sudo cp utils/service.prayer /etc/systemd/system/prayer.service
+
+# Enable and start service
 sudo systemctl enable prayer
 sudo systemctl start prayer
 ```
 
-Monitor service status:
+7. Monitor service status:
 ```bash
+# Check service status
 sudo systemctl status prayer
+
+# View service logs
 journalctl -u prayer
+
+# View detailed logs
+tail -f logs/play.log
 ```
+
+Note: The `service.prayer` file is excluded from git to prevent committing system-specific settings. Each installation should maintain its own local copy based on the `service.prayer_example` template.
 
 ## Development
 
