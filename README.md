@@ -4,19 +4,19 @@ Automated system for playing Adhan (prayer call) at scheduled times. Reads praye
 
 ## Project Structure
 ```
-├── schedule/           # Directory for schedule files
+├── schedule/                               # Directory for schedule files
 │   └── schedule_[month][year].{xlsx,json}
-├── sounds/            # Audio files directory
-│   ├── adhan.mp3     # Main prayer call audio
-│   └── beep.mp3      # Test audio file
-├── logs/             # Log files directory
-│   └── play.log      # Activity log
-├── utils/            # Configuration files
-│   ├── config.json   # Margin settings
-│   ├── volume.txt    # Volume settings
-│   ├── skip.txt      # Prayer skip settings
-│   └── service.prayer_example  # Systemd service template
-└── prayertimes.py    # Main application file
+├── sounds/                                 # Audio files directory
+│   ├── adhan.mp3                           # Main prayer call audio
+│   └── beep.mp3                            # Test audio file
+├── logs/                                   # Log files directory
+│   └── play.log                            # Activity log
+├── utils/                                  # Configuration files
+│   ├── config.json                          # Margin settings
+│   ├── volume.txt                          # Volume settings
+│   ├── skip.txt                            # Prayer skip settings
+│   └── service.prayer_example              # Systemd service template
+└── prayertimes.py                          # Main application file
 ```
 
 ## Dependencies
@@ -41,11 +41,11 @@ Configure how early the adhan should play before scheduled time.
 {
     "global_margin": 5,     # Applied to all prayers unless overridden
     "prayer_margins": {
-        "01-Fajr": 10,     # 10 minutes before Fajr
-        "02-Dhuhr": 5,     # 5 minutes before Dhuhr
-        "03-Asr": 5,       # 5 minutes before Asr
-        "04-Maghrib": 5,   # 5 minutes before Maghrib
-        "05-Isha": 5       # 5 minutes before Isha
+        "01-Fajr": 10,      # 10 minutes before Fajr
+        "02-Dhuhr": 5,      # 5 minutes before Dhuhr
+        "03-Asr": 5,        # 5 minutes before Asr
+        "04-Maghrib": 5,    # 5 minutes before Maghrib
+        "05-Isha": 5        # 5 minutes before Isha
     }
 }
 ```
@@ -54,7 +54,7 @@ Configure how early the adhan should play before scheduled time.
 Control volume levels for normal and test modes:
 ```
 execution:8    # Normal mode volume (0-10)
-dryrun:2      # Test mode volume (0-10)
+dryrun:2       # Test mode volume (0-10)
 ```
 
 ### Skip Settings (utils/skip.txt)
