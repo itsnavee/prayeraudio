@@ -27,4 +27,5 @@ play.log
 # Project specific
 schedule_*.json
 volume.txt
-skip.txt 
+skip.txt
+utils/service.prayer 

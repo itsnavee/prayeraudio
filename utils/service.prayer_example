@@ -1,0 +1,19 @@
+[Unit]
+Description=Prayer Times Audio Service
+After=sound.target
+
+[Service]
+Type=simple
+User=<your-username>
+Environment=XDG_RUNTIME_DIR=/run/user/<your-user-id>
+Environment=PULSE_RUNTIME_PATH=/run/user/<your-user-id>/pulse
+WorkingDirectory=/path/to/prayeraudio
+ExecStartPre=/bin/bash -c 'source /path/to/prayeraudio/.env/bin/activate'
+ExecStartPre=/bin/bash -c 'SINK_NAME=$(pactl list short sinks | grep "Jieli_Technology" | cut -f2) && pactl set-default-sink "$SINK_NAME"'
+ExecStartPre=/bin/bash -c 'SINK_NAME=$(pactl list short sinks | grep "Jieli_Technology" | cut -f2) && pactl set-sink-volume "$SINK_NAME" 100%'
+ExecStart=/bin/bash -c 'source /path/to/prayeraudio/.env/bin/activate && python3 prayertimes.py'
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target 
