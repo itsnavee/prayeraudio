@@ -25,7 +25,4 @@ play.log
 *.swo
 
 # Project specific
-schedule_*.json
-volume.txt
-skip.txt
 utils/service.prayer 

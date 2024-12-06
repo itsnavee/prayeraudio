@@ -1,0 +1,2 @@
+execution:8    # Normal mode volume (0-10)
+dryrun:2      # Test mode volume (0-10) 
